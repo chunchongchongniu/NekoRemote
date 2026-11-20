@@ -114,6 +114,12 @@ enum BrowserVideoController {
         return nil
     }
 
+    static func setPlaybackRate(_ browser: BrowserKind, _ rate: Double) -> Bool {
+        let js = "(function(){var v=document.querySelector('video');if(!v)return 'none';"
+            + "v.playbackRate=" + String(rate) + ";return 'ok';})()"
+        return runJS(js, in: browser)?.contains("ok") ?? false
+    }
+
     static func seek(_ browser: BrowserKind, seconds: Double) -> Bool {
         let js = "(function(){var v=document.querySelector('video');if(!v)return 'none';"
             + "v.currentTime=Math.max(0,Math.min(v.duration||1e9,v.currentTime+(" + String(seconds) + ")));"

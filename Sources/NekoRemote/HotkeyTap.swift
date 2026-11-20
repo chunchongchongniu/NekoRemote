@@ -7,7 +7,11 @@ final class HotkeyTap {
     var onToggle: (() -> Void)?
     var onSeekBackward: (() -> Void)?
     var onSeekForward: (() -> Void)?
+    var onRightDown: (() -> Void)?
+    var onRightUp: (() -> Void)?
     var shouldHandle: () -> Bool = { true }
+
+    private var rightHeld = false
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -20,7 +24,9 @@ final class HotkeyTap {
 
     func start() {
         // Tab and the arrow keys arrive as keyDown.
-        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+        let mask: CGEventMask =
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.keyUp.rawValue)
 
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             guard let refcon else { return Unmanaged.passUnretained(event) }
@@ -55,8 +61,19 @@ final class HotkeyTap {
             return Unmanaged.passUnretained(event)
         }
 
-        guard type == .keyDown else { return Unmanaged.passUnretained(event) }
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+
+        if type == .keyUp {
+            if keyCode == kVK_RightArrow, rightHeld {
+                rightHeld = false
+                guard shouldHandle() else { return Unmanaged.passUnretained(event) }
+                DispatchQueue.main.async { self.onRightUp?() }
+                return nil
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        guard type == .keyDown else { return Unmanaged.passUnretained(event) }
         switch keyCode {
         case kVK_Tab:
             guard shouldHandle() else { return Unmanaged.passUnretained(event) }
@@ -68,7 +85,10 @@ final class HotkeyTap {
             return nil
         case kVK_RightArrow:
             guard shouldHandle() else { return Unmanaged.passUnretained(event) }
-            DispatchQueue.main.async { self.onSeekForward?() }
+            if !rightHeld {
+                rightHeld = true
+                DispatchQueue.main.async { self.onRightDown?() }
+            }
             return nil
         default:
             return Unmanaged.passUnretained(event)

@@ -10,6 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var seekLabel: NSMenuItem!
     private var settings: Settings = .load()
 
+    // Right-arrow hold-to-boost state.
+    private let holdDelay: TimeInterval = 0.35
+    private var rightBoostWork: DispatchWorkItem?
+    private var rightBoosted = false
+    private var rightTarget: BrowserKind?
+
     // MARK: lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -112,21 +118,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = BrowserVideoController.seek(b, seconds: -self.settings.seekSeconds)
             self.flash("<<")
         }
+        // A short tap of -> seeks; holding it plays at 2x until release.
+        // The timer decides after holdDelay: if the key is still down we boost,
+        // otherwise we do the normal seek.
         let fwdHandler: () -> Void = { [weak self] in
             guard let self, let b = self.currentBrowser() else { return }
-            _ = BrowserVideoController.seek(b, seconds: self.settings.seekSeconds)
-            self.flash(">>")
+            self.rightTarget = b
+            self.cancelRightTimers()
+            let boost = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.rightBoosted = true
+                if BrowserVideoController.setPlaybackRate(b, 2.0) {
+                    self.flash("2x")
+                }
+            }
+            self.rightBoostWork = boost
+            DispatchQueue.main.asyncAfter(deadline: .now() + self.holdDelay, execute: boost)
+        }
+
+        let rightUp: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.cancelRightTimers()
+            if self.rightBoosted {
+                self.rightBoosted = false
+                if let b = self.rightTarget {
+                    _ = BrowserVideoController.setPlaybackRate(b, 1.0)
+                }
+                self.flash("1x")
+            } else if let b = self.rightTarget {
+                _ = BrowserVideoController.seek(b, seconds: self.settings.seekSeconds)
+                self.flash(">>")
+            }
         }
 
         tap.onToggle = toggleHandler
         tap.onSeekBackward = backHandler
-        tap.onSeekForward = fwdHandler
+        tap.onRightDown = fwdHandler
+        tap.onRightUp = rightUp
         hotkeys.onToggle = toggleHandler
         hotkeys.onSeekBackward = backHandler
-        hotkeys.onSeekForward = fwdHandler
+        // Carbon cannot see keyUp, so it only does plain seeks. The event tap
+        // (when permitted) upgrades -> to hold-to-boost.
+        hotkeys.onSeekForward = { [weak self] in
+            guard let self, let b = self.currentBrowser() else { return }
+            _ = BrowserVideoController.seek(b, seconds: self.settings.seekSeconds)
+            self.flash(">>")
+        }
         hotkeys.shouldHandle = tap.shouldHandle
         optionMonitor.onToggle = toggleHandler
         optionMonitor.shouldHandle = tap.shouldHandle
+    }
+
+    private func cancelRightTimers() {
+        rightBoostWork?.cancel()
+        rightBoostWork = nil
     }
 
     /// The browser we control: the frontmost one, or Safari/Chrome if the game is in front.
